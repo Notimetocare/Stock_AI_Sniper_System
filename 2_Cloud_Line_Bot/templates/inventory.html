@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 交易管家</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Microsoft JhengHei', sans-serif; padding: 10px; }
+        .card { border-radius: 12px; border: none; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 12px; }
+        .btn-add { width: 100%; border-radius: 8px; font-weight: bold; padding: 10px; background-color: #0d6efd; border:none; color: white; }
+        .loading { display: none; text-align: center; margin: 10px; color: #666; }
+        .stock-name { font-size: 0.9rem; color: #6c757d; margin-left: 6px; font-weight: normal; }
+    </style>
+</head>
+<body>
+
+<div class="container" style="max-width: 600px;">
+
+    <div class="card p-3">
+        <h5 class="mb-3 fw-bold text-primary">➕ 加入追蹤</h5>
+        <div class="row g-2">
+            <div class="col-4">
+                <input type="text" id="inputSymbol" class="form-control" placeholder="代號" onchange="fetchStockInfo()" onblur="fetchStockInfo()">
+            </div>
+            <div class="col-4">
+                <input type="number" id="inputPrice" class="form-control" placeholder="成交價">
+            </div>
+            <div class="col-4">
+                <input type="number" id="inputQty" class="form-control" placeholder="股數" value="1">
+            </div>
+        </div>
+
+        <div class="mt-2 text-center" style="min-height: 24px;">
+             <span id="stockNameDisplay" class="badge bg-info text-dark" style="display:none;"></span>
+             <span id="nameLoading" class="spinner-border spinner-border-sm text-secondary" style="display:none;"></span>
+        </div>
+
+        <div class="mt-2 p-2 bg-light rounded border d-flex justify-content-between align-items-center">
+            <div>
+                <small class="text-muted">鐵律停損 (手動設定)</small><br>
+                <input type="number" id="inputSL" class="form-control form-control-sm" style="width: 100px; font-weight:bold; color:#d32f2f;">
+            </div>
+        </div>
+
+        <button class="btn btn-primary btn-add mt-3" onclick="addItem()">加入庫存</button>
+    </div>
+
+    <div id="loading" class="loading">
+        <div class="spinner-border text-primary" role="status"></div>
+        <div class="mt-2">資料讀取中...</div>
+    </div>
+
+    <div id="inventoryList"></div>
+
+    <hr>
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="text-muted ms-2 mb-0">🗑️ 歷史紀錄</h6>
+        <button class="btn btn-sm btn-link text-decoration-none" onclick="toggleHistory()">展開/隱藏</button>
+    </div>
+    <div id="historyList" style="display:none;"></div>
+
+    <div class="text-center mt-4 mb-3">
+        <small class="text-muted">User ID</small><br>
+        <code id="debugId" style="background:#eee; padding:5px; border-radius:5px; font-size: 0.8rem;">Connecting...</code>
+    </div>
+
+</div>
+
+<script>
+    let userId = "";
+    const MY_LIFF_ID = "2008785495-XWtyJREB";
+
+    window.onload = function() {
+        document.getElementById('loading').style.display = 'block';
+
+        liff.init({ liffId: MY_LIFF_ID }).then(() => {
+            if (!liff.isLoggedIn()) {
+                liff.login();
+            } else {
+                liff.getProfile().then(profile => {
+                    userId = profile.userId;
+                    document.getElementById('debugId').innerText = userId;
+                    loadInventory();
+                }).catch(err => {
+                    useFallbackUser();
+                });
+            }
+        }).catch(err => {
+            console.log("LIFF Init Failed, use fallback");
+            useFallbackUser();
+        });
+    };
+
+    function useFallbackUser() {
+        userId = "Uede8959376b8f0f75ec59225836d8bc2";
+        document.getElementById('debugId').innerText = userId + " (Test Mode)";
+        loadInventory();
+    }
+
+    // ★ 查詢股票名稱與買訊 (關鍵修改)
+    async function fetchStockInfo() {
+        const symbolInput = document.getElementById('inputSymbol');
+        const symbol = symbolInput.value.trim().toUpperCase();
+
+        if (!symbol) return;
+        symbolInput.value = symbol; // 自動轉大寫
+
+        // 顯示 Loading 動畫
+        document.getElementById('nameLoading').style.display = 'inline-block';
+        document.getElementById('stockNameDisplay').style.display = 'none';
+
+        try {
+            const res = await axios.post('/api/stock_info', { symbol: symbol });
+
+            if (res.data.found) {
+                // 1. 顯示公司名稱
+                const nameDisplay = document.getElementById('stockNameDisplay');
+                if(res.data.stock_name) {
+                    nameDisplay.innerText = res.data.stock_name; // 這裡會顯示 Excel 或網路抓到的名字
+                    nameDisplay.style.display = 'inline-block';
+                }
+
+                // 2. 自動填入價格 (如果 CSV 有買訊)
+                if(res.data.price && res.data.price > 0) {
+                    document.getElementById('inputPrice').value = res.data.price;
+                }
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            // 隱藏 Loading 動畫
+            document.getElementById('nameLoading').style.display = 'none';
+        }
+    }
+
+    async function addItem() {
+        const symbol = document.getElementById('inputSymbol').value.trim();
+        const price = document.getElementById('inputPrice').value;
+        const qty = document.getElementById('inputQty').value;
+        const sl = document.getElementById('inputSL').value;
+
+        if (!symbol) { alert("請輸入股票代號"); return; }
+
+        document.getElementById('loading').style.display = 'block';
+
+        try {
+            await axios.post('/api/update_inventory', {
+                action: 'add', userId: userId, symbol: symbol, price: price, qty: qty, stop_loss: sl
+            });
+
+            // 清空並重置
+            document.getElementById('inputSymbol').value = "";
+            document.getElementById('inputPrice').value = "";
+            document.getElementById('inputQty').value = "1";
+            document.getElementById('inputSL').value = "";
+            document.getElementById('stockNameDisplay').style.display = 'none';
+
+            alert("✅ 加入成功！");
+            loadInventory();
+        } catch (e) {
+            alert("❌ 加入失敗");
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+        }
+    }
+
+    async function loadInventory() {
+        document.getElementById('loading').style.display = 'block';
+        try {
+            const res = await axios.post('/api/get_inventory', { userId: userId });
+            const data = res.data;
+            const activeData = data.active || [];
+            const historyData = data.history || [];
+
+            drawInventoryList(activeData, {});
+            drawHistoryList(historyData);
+
+            const symbols = activeData.map(i => i.symbol);
+            if(symbols.length > 0){
+                const priceRes = await axios.post('/api/get_market_prices', { symbols: symbols });
+                drawInventoryList(activeData, priceRes.data);
+            }
+        } catch(e) {
+            console.error("載入失敗:", e);
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+        }
+    }
+
+    function drawInventoryList(items, prices) {
+        let html = "";
+        if (items.length === 0) {
+            html = `<div class="text-center text-muted p-3">目前沒有庫存，請上方加入 👆</div>`;
+        }
+
+        items.forEach(item => {
+            let currPrice = prices[item.symbol];
+            let profitHtml = "";
+            let priceDisplay = `<span class="spinner-border spinner-border-sm text-secondary"></span>`;
+
+            if (currPrice !== undefined) {
+                if (currPrice === "---" || currPrice === 0) {
+                    priceDisplay = "<span style='color:#999'>---</span>";
+                } else {
+                    priceDisplay = `$${currPrice}`;
+                    let cost = item.cost_price;
+                    if (cost > 0) {
+                        let diff = currPrice - cost;
+                        let pct = (diff / cost) * 100;
+                        let color = pct >= 0 ? "#d32f2f" : "#1DB446";
+                        let sign = pct >= 0 ? "+" : "";
+                        profitHtml = `<span style="color:${color}; font-weight:bold; font-size:14px;">(${sign}${pct.toFixed(2)}%)</span>`;
+                    }
+                }
+            }
+
+            let nameHtml = "";
+            if (item.stock_name && item.stock_name !== item.symbol) {
+                nameHtml = `<span class="stock-name">${item.stock_name}</span>`;
+            }
+
+            let showCost = item.cost_price ? parseFloat(item.cost_price) : "";
+            let showSL = item.stop_loss ? parseFloat(item.stop_loss) : "";
+            let showQty = (item.quantity !== undefined) ? item.quantity : "1";
+
+            html += `
+            <div class="card p-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <h5 class="fw-bold mb-0" style="color:#1DB446; display:inline-block; margin-right:5px;">
+                            ${item.symbol}
+                        </h5>
+                        ${nameHtml}
+                        <div style="margin-top:2px;">${profitHtml}</div>
+                    </div>
+                    <button class="btn btn-sm btn-primary" onclick="editItem('${item.symbol}', ${item.id})">💾 儲存</button>
+                </div>
+
+                <div class="mb-2 p-2 bg-light rounded d-flex justify-content-between align-items-center">
+                    <span class="text-muted small">目前市價</span>
+                    <span class="fw-bold fs-5">${priceDisplay}</span>
+                </div>
+
+                <div class="row g-2">
+                    <div class="col-4">
+                        <label class="form-label" style="font-size:12px;">成本</label>
+                        <input type="number" id="price_${item.id}" class="form-control form-control-sm" value="${showCost}">
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label" style="font-size:12px;">股數</label>
+                        <input type="number" id="qty_${item.id}" class="form-control form-control-sm" value="${showQty}">
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label" style="font-size:12px; color:#c62828;">停損</label>
+                        <input type="number" id="sl_${item.id}" class="form-control form-control-sm text-danger fw-bold" value="${showSL}">
+                    </div>
+                </div>
+
+                <button class="btn btn-outline-secondary btn-sm mt-3 w-100" onclick="updateItem('delete', '${item.symbol}', ${item.id})">🗑️ 移除此股</button>
+            </div>`;
+        });
+        document.getElementById('inventoryList').innerHTML = html;
+    }
+
+    function drawHistoryList(items) {
+        let html = "";
+        if (items.length === 0) {
+            html = `<div class="text-muted small ms-3">尚無刪除紀錄</div>`;
+        } else {
+            items.forEach(item => {
+                let displayName = item.symbol;
+                if (item.stock_name && item.stock_name !== item.symbol) {
+                    displayName += ` <span style="font-size:0.85rem">(${item.stock_name})</span>`;
+                }
+                html += `
+                <div class="card p-2 bg-light text-muted mb-2" style="opacity:0.9">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="text-decoration-line-through fw-bold">${displayName}</span>
+                        </div>
+                        <button class="btn btn-sm btn-link text-primary" onclick="updateItem('restore', '${item.symbol}', ${item.id})">⏎ 復原</button>
+                    </div>
+                </div>`;
+            });
+        }
+        document.getElementById('historyList').innerHTML = html;
+    }
+
+    async function updateItem(action, symbol, id) {
+        let msg = action === 'delete' ? '移除' : '復原';
+        if(action === 'delete' && !confirm('確定要' + msg + ' ' + symbol + ' 嗎？')) return;
+        try {
+            await axios.post('/api/update_inventory', { action: action, userId: userId, symbol: symbol, id: id });
+            loadInventory();
+        } catch(e) { alert("操作失敗"); }
+    }
+
+    async function editItem(symbol, id) {
+        const newPrice = document.getElementById('price_' + id).value;
+        const newQty = document.getElementById('qty_' + id).value;
+        const newSL = document.getElementById('sl_' + id).value;
+        try {
+            await axios.post('/api/update_inventory', {
+                action: 'update', userId: userId, symbol: symbol, id: id, price: newPrice, qty: newQty, stop_loss: newSL
+            });
+            alert('✅ 更新成功！');
+            loadInventory();
+        } catch (e) { alert('❌ 更新失敗'); }
+    }
+
+    function toggleHistory() {
+        const el = document.getElementById('historyList');
+        el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+</script>
+
+</body>
+</html>

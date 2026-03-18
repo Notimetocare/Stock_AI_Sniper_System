@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登入中...</title>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f8f9fa; font-family: sans-serif; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div style="text-align:center;">
+        <div class="loader" style="margin: 0 auto;"></div>
+        <p style="margin-top:15px; color:#555;">正在驗證權限...</p>
+    </div>
+
+    <script>
+        liff.init({ liffId: "{{ liff_id }}" })
+            .then(() => {
+                if (!liff.isLoggedIn()) {
+                    liff.login();
+                } else {
+                    liff.getProfile().then(profile => {
+                        window.location.replace("/inventory?user_id=" + profile.userId);
+                    }).catch(err => { alert('Error: ' + err); });
+                }
+            })
+            .catch(err => { document.body.innerHTML = "LIFF Init Failed: " + err; });
+    </script>
+</body>
+</html>
