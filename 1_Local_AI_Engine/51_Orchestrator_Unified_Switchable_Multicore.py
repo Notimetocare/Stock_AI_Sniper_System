@@ -50,7 +50,7 @@ SCRIPTS = {
     "S2": "auto_label_support_lineview_v3_2_EngulfingRescue.py",
     "S3": "auto_label_pressure_band_v3_6_BreakdownMark_MODERATE_ONLY.py",
     "S4": "structure_event_v569_Switchable.py",
-    "STRATEGY": "Strategy_A_Commander_v137_Hybrid_Fix.py"
+    "STRATEGY": "Strategy_A_Commander_v146_Broken_Latch.py"
 }
 
 # 效能設定
